@@ -1,12 +1,17 @@
 import axios from 'axios';
 import type { ApiResponse } from '../types';
 
+const rawApiUrl = import.meta.env.VITE_API_URL || '';
+const normalizedBase = rawApiUrl
+  ? (rawApiUrl.startsWith('http://') || rawApiUrl.startsWith('https://') ? rawApiUrl : `https://${rawApiUrl}`)
+  : '';
+
 export const api = axios.create({
-  baseURL: '/api/v1',
+  baseURL: `${normalizedBase}/api/v1`,
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 15000,
+  timeout: 25000,
 });
 
 // Attach JWT token automatically

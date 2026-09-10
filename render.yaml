@@ -1,0 +1,79 @@
+# ==============================================================================
+# FraudLens AI - Render Cloud Deployment Blueprint
+# Infrastructure-as-Code for Node.js Express, Python FastAPI, and React 19 SPA
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. Intelligence Service (Python 3.11 + FastAPI + NetworkX + Scikit-Learn)
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: fraudlens-intelligence
+    runtime: python
+    rootDir: intelligence-service
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DEBUG
+        value: "False"
+      - key: HOST
+        value: "0.0.0.0"
+    healthCheckPath: /api/v1/health
+
+  # ----------------------------------------------------------------------------
+  # 2. Application Backend (Node.js 20 + Express + Mongoose + Zod)
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: fraudlens-backend
+    runtime: node
+    rootDir: backend
+    plan: free
+    region: oregon
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        value: memory
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: INTELLIGENCE_SERVICE_URL
+        fromService:
+          type: web
+          name: fraudlens-intelligence
+          property: host
+      - key: CLIENT_ORIGIN
+        value: "*"
+    healthCheckPath: /api/v1/health
+
+  # ----------------------------------------------------------------------------
+  # 3. Web Frontend (React 19 + TypeScript + Vite + Tailwind CSS v4)
+  # ----------------------------------------------------------------------------
+  - type: static
+    name: fraudlens-frontend
+    rootDir: frontend
+    plan: free
+    region: oregon
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: fraudlens-backend
+          property: host
