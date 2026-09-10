@@ -1,11 +1,11 @@
 # ==============================================================================
-# FraudLens AI - Render Cloud Deployment Blueprint
-# Infrastructure-as-Code for Node.js Express, Python FastAPI, and React 19 SPA
+# FraudLens AI - Render Cloud Deployment Blueprint (Spec-Compliant)
+# Infrastructure-as-Code for Python FastAPI, Node.js Express, and React 19 SPA
 # ==============================================================================
 
 services:
   # ----------------------------------------------------------------------------
-  # 1. Intelligence Service (Python 3.11 + FastAPI + NetworkX + Scikit-Learn)
+  # 1. Intelligence Analytics Service (Python 3.11 FastAPI + NetworkX + ML)
   # ----------------------------------------------------------------------------
   - type: web
     name: fraudlens-intelligence
@@ -25,7 +25,7 @@ services:
     healthCheckPath: /api/v1/health
 
   # ----------------------------------------------------------------------------
-  # 2. Application Backend (Node.js 20 + Express + Mongoose + Zod)
+  # 2. Application Backend API (Node.js 20 Express + Mongoose + Zod)
   # ----------------------------------------------------------------------------
   - type: web
     name: fraudlens-backend
@@ -47,19 +47,17 @@ services:
       - key: JWT_EXPIRES_IN
         value: 7d
       - key: INTELLIGENCE_SERVICE_URL
-        fromService:
-          type: web
-          name: fraudlens-intelligence
-          property: host
+        value: http://fraudlens-intelligence:10000
       - key: CLIENT_ORIGIN
         value: "*"
     healthCheckPath: /api/v1/health
 
   # ----------------------------------------------------------------------------
-  # 3. Web Frontend (React 19 + TypeScript + Vite + Tailwind CSS v4)
+  # 3. Web Presentation Layer (React 19 SPA + Vite + Tailwind CSS v4)
   # ----------------------------------------------------------------------------
-  - type: static
+  - type: web
     name: fraudlens-frontend
+    runtime: static
     rootDir: frontend
     plan: free
     region: oregon
@@ -72,8 +70,3 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 20.18.0
-      - key: VITE_API_URL
-        fromService:
-          type: web
-          name: fraudlens-backend
-          property: host

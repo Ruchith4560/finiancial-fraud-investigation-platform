@@ -1,7 +1,11 @@
 import axios from 'axios';
 import type { ApiResponse } from '../types';
 
-const rawApiUrl = import.meta.env.VITE_API_URL || '';
+// Auto-detect cloud backend on Render if VITE_API_URL was not set at build time
+const isRenderCloud = typeof window !== 'undefined' && window.location.hostname.endsWith('.onrender.com');
+const defaultCloudUrl = isRenderCloud ? 'https://fraudlens-backend.onrender.com' : '';
+
+const rawApiUrl = import.meta.env.VITE_API_URL || defaultCloudUrl;
 const normalizedBase = rawApiUrl
   ? (rawApiUrl.startsWith('http://') || rawApiUrl.startsWith('https://') ? rawApiUrl : `https://${rawApiUrl}`)
   : '';
@@ -11,7 +15,7 @@ export const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 25000,
+  timeout: 30000,
 });
 
 // Attach JWT token automatically
