@@ -1,0 +1,43 @@
+import axios from 'axios';
+import type { ApiResponse } from '../types';
+
+export const api = axios.create({
+  baseURL: '/api/v1',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  timeout: 15000,
+});
+
+// Attach JWT token automatically
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('fraudlens_token');
+  if (token && config.headers) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Response interceptor to normalize errors
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('fraudlens_token');
+      localStorage.removeItem('fraudlens_user');
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+// Helper for unwrapping ApiResponse<T>
+export async function fetchApi<T>(promise: Promise<{ data: ApiResponse<T> }>): Promise<T> {
+  const response = await promise;
+  if (!response.data.success) {
+    throw new Error(response.data.error?.message || 'API request failed');
+  }
+  return response.data.data;
+}

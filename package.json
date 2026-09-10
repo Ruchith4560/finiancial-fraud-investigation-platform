@@ -1,0 +1,27 @@
+{
+  "name": "fraudlens-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FraudLens AI - AI-Assisted Financial Fraud Investigation & Case Intelligence Platform",
+  "scripts": {
+    "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "backend:dev": "npm --prefix backend run dev",
+    "frontend:dev": "npm --prefix frontend run dev",
+    "intelligence:dev": "cd intelligence-service && python -m uvicorn main:app --reload --port 8000",
+    "test:intelligence": "cd intelligence-service && pytest",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down"
+  },
+  "keywords": [
+    "fraud-detection",
+    "investigation-platform",
+    "financial-crime",
+    "graph-analytics",
+    "fastapi",
+    "react",
+    "express",
+    "mongodb"
+  ],
+  "author": "",
+  "license": "MIT"
+}

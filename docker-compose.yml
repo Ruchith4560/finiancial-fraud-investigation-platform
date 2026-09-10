@@ -1,0 +1,105 @@
+# ==============================================================================
+# FraudLens AI - Enterprise Multi-Service Docker Compose Orchestration
+# Services: MongoDB 7.0 + Python Intelligence Service + Express Backend + React Nginx Frontend
+# ==============================================================================
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: fraudlens_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: fraudlens
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - fraudlens_network
+
+  intelligence-service:
+    build:
+      context: ./intelligence-service
+      dockerfile: Dockerfile
+    container_name: fraudlens_intelligence
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DEBUG=False
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - fraudlens_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fraudlens_backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - NODE_ENV=production
+      - MONGODB_URI=mongodb://mongodb:27017/fraudlens
+      - JWT_SECRET=${JWT_SECRET:-super_secret_fraudlens_jwt_dev_key_change_in_production_99}
+      - JWT_EXPIRES_IN=7d
+      - INTELLIGENCE_SERVICE_URL=http://intelligence-service:8000
+      - CLIENT_ORIGIN=http://localhost:5173
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      intelligence-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - fraudlens_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: fraudlens_frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - fraudlens_network
+
+volumes:
+  mongo_data:
+    driver: local
+
+networks:
+  fraudlens_network:
+    driver: bridge
