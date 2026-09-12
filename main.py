@@ -6,8 +6,17 @@ Enables running the Intelligence Service (FastAPI) directly from the repository 
 import os
 import sys
 import importlib.util
-from fastapi import Request
+import base64
+import json
+import hmac
+import hashlib
+import time
+import uuid
+from typing import Optional, Dict, Any
+from pydantic import BaseModel
+from fastapi import Request, HTTPException, Depends, Header
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 # 1. Add intelligence-service directory to sys.path so its internal modules (app.*) resolve cleanly
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -29,7 +38,199 @@ spec.loader.exec_module(intelligence_module)
 # Expose the FastAPI app instance for ASGI servers (uvicorn main:app, gunicorn, etc.)
 app = intelligence_module.app
 
-# Replace default JSON "/" route with content-negotiated portal
+# Configure wide CORS support on the root app to allow local and Render frontends
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"https?://.*",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ==============================================================================
+# In-Memory Authentication Engine & JWT Support for Full-Stack Cloud Deployment
+# ==============================================================================
+JWT_SECRET = os.environ.get("JWT_SECRET", "fraudlens-cloud-deployment-secret-2026")
+
+def create_jwt(payload: dict) -> str:
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).decode().rstrip("=")
+    p_enc = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    sig = base64.urlsafe_b64encode(hmac.new(JWT_SECRET.encode(), f"{header}.{p_enc}".encode(), hashlib.sha256).digest()).decode().rstrip("=")
+    return f"{header}.{p_enc}.{sig}"
+
+def verify_jwt(token: str) -> Optional[dict]:
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+        header, payload, sig = parts
+        expected_sig = base64.urlsafe_b64encode(hmac.new(JWT_SECRET.encode(), f"{header}.{payload}".encode(), hashlib.sha256).digest()).decode().rstrip("=")
+        if not hmac.compare_digest(sig, expected_sig):
+            return None
+        padding = (4 - len(payload) % 4) % 4
+        payload_padded = payload + "=" * padding
+        return json.loads(base64.urlsafe_b64decode(payload_padded).decode())
+    except Exception:
+        return None
+
+# Seeded default user accounts
+MOCK_USERS: Dict[str, Dict[str, Any]] = {
+    "investigator@fraudlens.internal": {
+        "id": "usr_inv_001",
+        "username": "investigator",
+        "email": "investigator@fraudlens.internal",
+        "password": "investigator123",
+        "fullName": "Sarah Chen, CAMS",
+        "role": "investigator"
+    },
+    "admin@fraudlens.internal": {
+        "id": "usr_adm_001",
+        "username": "admin",
+        "email": "admin@fraudlens.internal",
+        "password": "admin123",
+        "fullName": "Marcus Vance",
+        "role": "admin"
+    }
+}
+
+class LoginDTO(BaseModel):
+    email: str
+    password: str
+
+class RegisterDTO(BaseModel):
+    fullName: str
+    username: str
+    email: str
+    password: str
+    role: Optional[str] = "investigator"
+
+@app.post("/api/v1/auth/login")
+async def auth_login(dto: LoginDTO):
+    norm_email = dto.email.lower().strip()
+    user = MOCK_USERS.get(norm_email)
+    
+    if not user or user["password"] != dto.password:
+        raise HTTPException(
+            status_code=401,
+            detail={"success": False, "error": {"message": "Invalid email or password", "code": "INVALID_CREDENTIALS"}}
+        )
+    
+    payload = {
+        "userId": user["id"],
+        "email": user["email"],
+        "role": user["role"],
+        "fullName": user["fullName"],
+        "exp": int(time.time()) + 86400 * 7
+    }
+    token = create_jwt(payload)
+    
+    return {
+        "success": True,
+        "data": {
+            "token": token,
+            "user": {
+                "id": user["id"],
+                "username": user["username"],
+                "email": user["email"],
+                "fullName": user["fullName"],
+                "role": user["role"],
+                "createdAt": "2026-09-12T12:00:00Z"
+            }
+        }
+    }
+
+@app.post("/api/v1/auth/register", status_code=201)
+async def auth_register(dto: RegisterDTO):
+    norm_email = dto.email.lower().strip()
+    norm_username = dto.username.lower().strip()
+    
+    if norm_email in MOCK_USERS:
+        raise HTTPException(
+            status_code=409,
+            detail={"success": False, "error": {"message": "An account with this email address already exists", "code": "EMAIL_EXISTS"}}
+        )
+        
+    for u in MOCK_USERS.values():
+        if u["username"].lower() == norm_username:
+            raise HTTPException(
+                status_code=409,
+                detail={"success": False, "error": {"message": "An account with this username already exists", "code": "USERNAME_EXISTS"}}
+            )
+            
+    if len(dto.password) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail={"success": False, "error": {"message": "Password must be at least 8 characters long", "code": "VALIDATION_ERROR"}}
+        )
+        
+    user_id = f"usr_{uuid.uuid4().hex[:8]}"
+    role = dto.role if dto.role in ["admin", "investigator"] else "investigator"
+    
+    new_user = {
+        "id": user_id,
+        "username": norm_username,
+        "email": norm_email,
+        "password": dto.password,
+        "fullName": dto.fullName.strip(),
+        "role": role,
+        "createdAt": "2026-09-12T12:00:00Z"
+    }
+    MOCK_USERS[norm_email] = new_user
+    
+    payload = {
+        "userId": user_id,
+        "email": norm_email,
+        "role": role,
+        "fullName": new_user["fullName"],
+        "exp": int(time.time()) + 86400 * 7
+    }
+    token = create_jwt(payload)
+    
+    return {
+        "success": True,
+        "data": {
+            "token": token,
+            "user": {
+                "id": user_id,
+                "username": new_user["username"],
+                "email": norm_email,
+                "fullName": new_user["fullName"],
+                "role": role,
+                "createdAt": "2026-09-12T12:00:00Z"
+            }
+        }
+    }
+
+@app.get("/api/v1/auth/me")
+async def auth_get_me(authorization: Optional[str] = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail={"success": False, "error": {"message": "Missing authorization token", "code": "UNAUTHORIZED"}}
+        )
+    token = authorization.split(" ")[1]
+    payload = verify_jwt(token)
+    if not payload:
+        raise HTTPException(
+            status_code=401,
+            detail={"success": False, "error": {"message": "Invalid or expired token", "code": "UNAUTHORIZED"}}
+        )
+    return {
+        "success": True,
+        "data": {
+            "user": {
+                "id": payload.get("userId"),
+                "email": payload.get("email"),
+                "fullName": payload.get("fullName"),
+                "role": payload.get("role"),
+                "createdAt": "2026-09-12T12:00:00Z"
+            }
+        }
+    }
+
+# ==============================================================================
+# Visual Portal & Documentation Gateway
+# ==============================================================================
 LANDING_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -196,12 +397,6 @@ LANDING_HTML = """<!DOCTYPE html>
       font-size: 0.9rem;
       line-height: 1.55;
     }
-    .info-card ul {
-      padding-left: 1.25rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.375rem;
-    }
     .pill-row {
       display: flex;
       flex-wrap: wrap;
@@ -267,14 +462,14 @@ LANDING_HTML = """<!DOCTYPE html>
         <h2>
           <span>🧠</span> Active Engine Capabilities
         </h2>
-        <p>This Python microservice provides the analytical brain for FraudLens AI:</p>
+        <p>This Python microservice provides the analytical brain and auth gateway for FraudLens AI:</p>
         <div class="pill-row">
+          <span class="pill">User Auth & Registration</span>
+          <span class="pill">Role-Based Access (Investigator/Admin)</span>
           <span class="pill">Isolation Forest ML</span>
           <span class="pill">NetworkX Graph Analytics</span>
           <span class="pill">Deterministic AML Rules</span>
           <span class="pill">SAR Narrative Synthesis</span>
-          <span class="pill">Cycles & Smurfing Detection</span>
-          <span class="pill">Ego-Network Extraction</span>
         </div>
       </div>
 
@@ -283,7 +478,7 @@ LANDING_HTML = """<!DOCTYPE html>
           <span>🖥️</span> Why am I seeing this page?
         </h2>
         <p>
-          This URL is the <strong>Python Intelligence Service</strong> API backend.
+          This URL is the <strong>FraudLens Intelligence & API Gateway</strong> backend.
           The visual investigator web interface lives in the <code>frontend/</code> directory (built with React 19, Cytoscape.js, and Tailwind CSS).
         </p>
         <div class="tip-box">
@@ -315,6 +510,7 @@ async def custom_root_portal(request: Request):
             "docs": "/api/v1/docs",
             "health": "/api/v1/health",
             "capabilities": [
+                "authentication_and_registration",
                 "deterministic_rule_engine",
                 "isolation_forest_anomaly_scorer",
                 "networkx_graph_analytics",

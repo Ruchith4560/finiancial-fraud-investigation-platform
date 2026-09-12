@@ -1,25 +1,45 @@
 import axios from 'axios';
 import type { ApiResponse } from '../types';
 
-// Auto-detect cloud backend on Render if VITE_API_URL was not set at build time
-const isRenderCloud = typeof window !== 'undefined' && window.location.hostname.endsWith('.onrender.com');
-const defaultCloudUrl = isRenderCloud ? 'https://fraudlens-backend.onrender.com' : '';
+export function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    // 1. Check user manual override in localStorage
+    const saved = localStorage.getItem('fraudlens_api_url');
+    if (saved && saved.trim()) {
+      return saved.trim().replace(/\/+$/, '');
+    }
+  }
 
-const rawApiUrl = import.meta.env.VITE_API_URL || defaultCloudUrl;
-const normalizedBase = rawApiUrl
-  ? (rawApiUrl.startsWith('http://') || rawApiUrl.startsWith('https://') ? rawApiUrl : `https://${rawApiUrl}`)
-  : '';
+  // 2. Check build-time Vite environment variable
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (envUrl && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+
+  // 3. If running in cloud (Render), point to active microservice gateway
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    if (hostname.endsWith('.onrender.com')) {
+      return 'https://finiancial-fraud-investigation-platform08.onrender.com';
+    }
+  }
+
+  return '';
+}
 
 export const api = axios.create({
-  baseURL: `${normalizedBase}/api/v1`,
+  baseURL: `${getApiBaseUrl()}/api/v1`,
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 30000,
+  timeout: 15000,
 });
 
-// Attach JWT token automatically
+// Dynamically attach baseURL & JWT token on every request
 api.interceptors.request.use((config) => {
+  const currentBase = getApiBaseUrl();
+  config.baseURL = currentBase ? `${currentBase}/api/v1` : '/api/v1';
+
   const token = localStorage.getItem('fraudlens_token');
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -27,14 +47,14 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor to normalize errors
+// Response interceptor to normalize errors without aggressive redirect loops
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('fraudlens_token');
-      localStorage.removeItem('fraudlens_user');
-      if (window.location.pathname !== '/login') {
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+        localStorage.removeItem('fraudlens_token');
+        localStorage.removeItem('fraudlens_user');
         window.location.href = '/login';
       }
     }

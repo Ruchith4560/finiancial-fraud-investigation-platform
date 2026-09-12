@@ -38,12 +38,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setUser(res.data.data.user);
           localStorage.setItem('fraudlens_user', JSON.stringify(res.data.data.user));
         }
-      } catch {
-        // Token expired or invalid
-        localStorage.removeItem('fraudlens_token');
-        localStorage.removeItem('fraudlens_user');
-        setToken(null);
-        setUser(null);
+      } catch (err: any) {
+        // Only clear session if server explicitly returned 401/403 (invalid or expired token)
+        if (err.response && (err.response.status === 401 || err.response.status === 403)) {
+          localStorage.removeItem('fraudlens_token');
+          localStorage.removeItem('fraudlens_user');
+          setToken(null);
+          setUser(null);
+        } else {
+          // On network errors or offline mode, maintain authenticated state using cached user
+          const saved = localStorage.getItem('fraudlens_user');
+          if (saved) {
+            try {
+              setUser(JSON.parse(saved));
+            } catch {
+              // ignore parse errors
+            }
+          }
+        }
       } finally {
         setIsLoading(false);
       }
