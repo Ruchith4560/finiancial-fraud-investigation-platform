@@ -55,9 +55,35 @@ async function runAuthTests() {
   if (adminResult.user.role !== 'admin') throw new Error('Admin role mismatch');
   console.log('✓ Test 4 Passed: Admin user authenticated successfully with admin role.');
 
+  // 6. Test Registration for Investigator
+  console.log('\n[Test 5] Testing registration for new investigator...');
+  const newInvestigator = await AuthService.register({
+    fullName: 'Jane Investigator',
+    username: 'jane_inv',
+    email: 'jane.inv@fraudlens.internal',
+    password: 'securePassword123!',
+    role: 'investigator',
+  });
+  if (!newInvestigator.token) throw new Error('Registration did not issue token');
+  if (newInvestigator.user.role !== 'investigator') throw new Error('Role mismatch on registration');
+  console.log(`✓ Test 5 Passed: Successfully registered investigator '${newInvestigator.user.fullName}' with JWT.`);
+
+  // 7. Test Registration for Admin
+  console.log('\n[Test 6] Testing registration for new admin...');
+  const newAdmin = await AuthService.register({
+    fullName: 'Alex Administrator',
+    username: 'alex_adm',
+    email: 'alex.adm@fraudlens.internal',
+    password: 'secureAdminPass123!',
+    role: 'admin',
+  });
+  if (!newAdmin.token) throw new Error('Admin registration did not issue token');
+  if (newAdmin.user.role !== 'admin') throw new Error('Role mismatch on admin registration');
+  console.log(`✓ Test 6 Passed: Successfully registered admin '${newAdmin.user.fullName}' with JWT.`);
+
   // Disconnect cleanly
   await disconnectDatabase();
-  console.log('\n--- ALL PHASE 2 AUTH TESTS PASSED PERFECTLY ---');
+  console.log('\n--- ALL AUTH INTEGRATION TESTS PASSED PERFECTLY ---');
   process.exit(0);
 }
 

@@ -10,5 +10,5 @@ authRouter.post('/login', AuthController.login);
 // Protected routes
 authRouter.get('/me', requireAuth, AuthController.getMe);
 
-// Admin-only user registration
-authRouter.post('/register', requireAuth, requireRole(['admin']), AuthController.register);
+// User registration (public for onboarding new investigators and admins)
+authRouter.post('/register', AuthController.register);
