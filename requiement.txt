@@ -1,0 +1,2 @@
+# Reference to canonical requirements.txt
+-r requirements.txt
