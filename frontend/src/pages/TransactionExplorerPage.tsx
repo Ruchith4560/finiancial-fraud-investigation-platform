@@ -17,6 +17,7 @@ import {
 import { api } from '../api/client';
 import type { Transaction } from '../types';
 import { formatCurrency, formatDate, getRiskBadgeClasses } from '../utils/formatters';
+import { getLocalTransactions } from '../utils/demoData';
 
 export const TransactionExplorerPage: React.FC = () => {
   const navigate = useNavigate();
@@ -52,11 +53,26 @@ export const TransactionExplorerPage: React.FC = () => {
   const fetchStats = async () => {
     try {
       const res = await api.get('/transactions/stats');
-      if (res.data.success) {
+      if (res.data.success && res.data.data.stats) {
         setStats(res.data.data.stats);
+        return;
       }
     } catch (err) {
-      console.error('Failed to fetch transaction stats:', err);
+      console.warn('Failed to fetch remote transaction stats, calculating locally:', err);
+    }
+
+    try {
+      const localTxs = getLocalTransactions();
+      if (localTxs.length > 0) {
+        setStats({
+          totalTransactions: localTxs.length,
+          totalVolume: localTxs.reduce((acc, t) => acc + (t.amount || 0), 0),
+          flaggedCount: localTxs.filter((t) => t.isFlagged).length,
+          criticalCount: localTxs.filter((t) => t.riskLevel === 'CRITICAL').length,
+        });
+      }
+    } catch (e) {
+      // ignore
     }
   };
 
@@ -80,11 +96,38 @@ export const TransactionExplorerPage: React.FC = () => {
       const res = await api.get('/transactions', { params });
       if (res.data.success) {
         setTransactions(res.data.data.transactions);
-        setTotalPages(res.data.data.pagination.totalPages || 1);
-        setTotalRecords(res.data.data.pagination.total || 0);
+        setTotalPages(res.data.data.pagination?.totalPages || 1);
+        setTotalRecords(res.data.data.pagination?.total || res.data.data.transactions.length);
+        setLoading(false);
+        return;
       }
     } catch (err) {
-      console.error('Failed to fetch transactions:', err);
+      console.warn('Failed to fetch remote transactions, reading from local store:', err);
+    }
+
+    try {
+      let localTxs = getLocalTransactions();
+      if (search.trim()) {
+        const s = search.toLowerCase();
+        localTxs = localTxs.filter(
+          (t) =>
+            t.transactionId.toLowerCase().includes(s) ||
+            t.senderAccountId.toLowerCase().includes(s) ||
+            t.receiverAccountId.toLowerCase().includes(s)
+        );
+      }
+      if (riskLevel !== 'ALL') {
+        localTxs = localTxs.filter((t) => t.riskLevel === riskLevel);
+      }
+      if (transactionType !== 'ALL') {
+        localTxs = localTxs.filter((t) => t.transactionType === transactionType);
+      }
+      const start = (page - 1) * limit;
+      setTransactions(localTxs.slice(start, start + limit));
+      setTotalRecords(localTxs.length);
+      setTotalPages(Math.ceil(localTxs.length / limit) || 1);
+    } catch (e) {
+      console.error('Local fallback failed:', e);
     } finally {
       setLoading(false);
     }

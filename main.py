@@ -12,9 +12,12 @@ import hmac
 import hashlib
 import time
 import uuid
-from typing import Optional, Dict, Any
+import csv
+import io
+import datetime
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
-from fastapi import Request, HTTPException, Depends, Header
+from fastapi import Request, HTTPException, Depends, Header, UploadFile, File, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -225,6 +228,515 @@ async def auth_get_me(authorization: Optional[str] = Header(None)):
                 "role": payload.get("role"),
                 "createdAt": "2026-09-12T12:00:00Z"
             }
+        }
+    }
+
+# ==============================================================================
+# Transaction Ingestion, Batch Management & Enterprise Demo Dataset Engine
+# ==============================================================================
+MOCK_TRANSACTIONS: List[Dict[str, Any]] = []
+MOCK_BATCHES: List[Dict[str, Any]] = []
+MOCK_ALERTS: List[Dict[str, Any]] = []
+MOCK_CASES: List[Dict[str, Any]] = []
+
+def generate_enterprise_demo_data():
+    base_time = datetime.datetime(2026, 9, 1, 8, 0, 0, tzinfo=datetime.timezone.utc)
+    txs = []
+    
+    # 1. Rapid fund pass-through (Victim -> Mule -> Exit in 28 mins)
+    t1 = base_time + datetime.timedelta(days=3, hours=14)
+    txs.append({
+        "_id": "tx_1001",
+        "transactionId": "TX-1001",
+        "senderAccountId": "ACC-VICTIM-10",
+        "receiverAccountId": "ACC-MULE-ALPHA",
+        "amount": 48500.0,
+        "currency": "USD",
+        "timestamp": t1.isoformat(),
+        "transactionType": "TRANSFER",
+        "deviceId": "DEV-VICTIM-MAC",
+        "ipAddress": "198.51.100.12",
+        "riskScore": 92,
+        "riskLevel": "CRITICAL",
+        "isFlagged": True,
+        "riskFactors": [{"ruleId": "RULE-RAPID-MOVEMENT", "ruleName": "Rapid Fund Pass-through", "description": "Pass-through velocity under 30 minutes with >95% balance retention", "scoreContribution": 60}]
+    })
+    txs.append({
+        "_id": "tx_1002",
+        "transactionId": "TX-1002",
+        "senderAccountId": "ACC-MULE-ALPHA",
+        "receiverAccountId": "ACC-OFFSHORE-99",
+        "amount": 47200.0,
+        "currency": "USD",
+        "timestamp": (t1 + datetime.timedelta(minutes=28)).isoformat(),
+        "transactionType": "TRANSFER",
+        "deviceId": "DEV-MULE-ANDROID",
+        "ipAddress": "203.0.113.44",
+        "riskScore": 94,
+        "riskLevel": "CRITICAL",
+        "isFlagged": True,
+        "riskFactors": [{"ruleId": "RULE-RAPID-MOVEMENT", "ruleName": "Rapid Fund Pass-through", "description": "Pass-through velocity under 30 minutes with >95% balance retention", "scoreContribution": 60}]
+    })
+
+    # 2. Fan-in Smurfing (<$10,000 threshold)
+    t2 = base_time + datetime.timedelta(days=5, hours=9)
+    for i in range(6):
+        txs.append({
+            "_id": f"tx_{1003+i}",
+            "transactionId": f"TX-{1003+i}",
+            "senderAccountId": f"ACC-SMURF-0{i+1}",
+            "receiverAccountId": "ACC-HUB-CENTRAL",
+            "amount": 9850.0 + i * 25.0,
+            "currency": "USD",
+            "timestamp": (t2 + datetime.timedelta(minutes=i*55)).isoformat(),
+            "transactionType": "TRANSFER",
+            "deviceId": f"DEV-SMURF-PH0{i+1}",
+            "ipAddress": f"192.0.2.{50+i}",
+            "riskScore": 88,
+            "riskLevel": "CRITICAL",
+            "isFlagged": True,
+            "riskFactors": [{"ruleId": "RULE-STRUCTURING", "ruleName": "Potential Structuring / Smurfing", "description": "Amount just below $10,000 BSA mandatory CTR threshold", "scoreContribution": 35}]
+        })
+
+    # 3. Fan-out Layering (Rapid Dispersion)
+    t3 = t2 + datetime.timedelta(hours=12)
+    for i in range(5):
+        txs.append({
+            "_id": f"tx_{1009+i}",
+            "transactionId": f"TX-{1009+i}",
+            "senderAccountId": "ACC-HUB-CENTRAL",
+            "receiverAccountId": f"ACC-EXIT-0{i+1}",
+            "amount": 8900.0,
+            "currency": "USD",
+            "timestamp": (t3 + datetime.timedelta(minutes=i*30)).isoformat(),
+            "transactionType": "TRANSFER",
+            "deviceId": "DEV-HUB-SERVER",
+            "ipAddress": "198.51.100.88",
+            "riskScore": 82,
+            "riskLevel": "HIGH",
+            "isFlagged": True,
+            "riskFactors": [{"ruleId": "RULE-FAN-OUT", "ruleName": "Rapid Dispersion Layering", "description": "High out-degree dispersal following smurfing aggregation", "scoreContribution": 45}]
+        })
+
+    # 4. Circular Graph Cycle (4-hop loop)
+    ring_nodes = ["ACC-RING-A", "ACC-RING-B", "ACC-RING-C", "ACC-RING-D"]
+    t4 = base_time + datetime.timedelta(days=7, hours=10)
+    for i in range(4):
+        sender = ring_nodes[i]
+        receiver = ring_nodes[(i + 1) % 4]
+        txs.append({
+            "_id": f"tx_{1014+i}",
+            "transactionId": f"TX-{1014+i}",
+            "senderAccountId": sender,
+            "receiverAccountId": receiver,
+            "amount": 15000.0,
+            "currency": "USD",
+            "timestamp": (t4 + datetime.timedelta(hours=i*6)).isoformat(),
+            "transactionType": "TRANSFER",
+            "deviceId": f"DEV-RING-{i+1}",
+            "ipAddress": f"198.51.100.{100+i}",
+            "riskScore": 85,
+            "riskLevel": "HIGH",
+            "isFlagged": True,
+            "riskFactors": [{"ruleId": "RULE-CIRCULAR-TRANSFER", "ruleName": "Directed Graph Cycle", "description": "Closed 4-node transfer loop returning to source", "scoreContribution": 50}]
+        })
+
+    # 5. Shared Device Farm (Emulators)
+    t5 = base_time + datetime.timedelta(days=8, hours=15)
+    for i in range(4):
+        txs.append({
+            "_id": f"tx_{1018+i}",
+            "transactionId": f"TX-{1018+i}",
+            "senderAccountId": f"ACC-DEV-ACC-0{i+1}",
+            "receiverAccountId": f"ACC-DEV-DEST-0{i+1}",
+            "amount": 6200.0,
+            "currency": "USD",
+            "timestamp": (t5 + datetime.timedelta(minutes=i*20)).isoformat(),
+            "transactionType": "TRANSFER",
+            "deviceId": "DEV-EMULATOR-NOX-09",
+            "ipAddress": "203.0.113.88",
+            "riskScore": 78,
+            "riskLevel": "HIGH",
+            "isFlagged": True,
+            "riskFactors": [{"ruleId": "RULE-SHARED-DEVICE", "ruleName": "Shared Hardware Fingerprint", "description": "Single emulator hardware identifier shared across unrelated accounts", "scoreContribution": 45}]
+        })
+
+    # Baseline legitimate retail transfers
+    for i in range(1, 40):
+        t_norm = base_time + datetime.timedelta(days=i % 10, hours=(i * 3) % 24)
+        amt = round(45.0 + (i * 37.5) % 1200, 2)
+        txs.append({
+            "_id": f"tx_norm_{i}",
+            "transactionId": f"TX-NORM-{1000+i}",
+            "senderAccountId": f"ACC-USER-{100+i}",
+            "receiverAccountId": f"ACC-MERCHANT-{(i % 8)+1}",
+            "amount": amt,
+            "currency": "USD",
+            "timestamp": t_norm.isoformat(),
+            "transactionType": "PAYMENT" if i % 2 == 0 else "TRANSFER",
+            "deviceId": f"DEV-IPHONE-{i}",
+            "ipAddress": f"198.51.100.{(i % 50) + 1}",
+            "riskScore": 12,
+            "riskLevel": "LOW",
+            "isFlagged": False,
+            "riskFactors": []
+        })
+
+    return txs
+
+def seed_demo_data():
+    global MOCK_TRANSACTIONS, MOCK_BATCHES, MOCK_ALERTS, MOCK_CASES
+    demo_txs = generate_enterprise_demo_data()
+    batch_id = "BATCH-DEMO-ENT-001"
+    
+    for tx in demo_txs:
+        tx["ingestionBatchId"] = batch_id
+        
+    MOCK_TRANSACTIONS = demo_txs
+    
+    MOCK_BATCHES = [
+        {
+            "_id": f"batch_{batch_id}",
+            "batchId": batch_id,
+            "filename": "enterprise_mule_syndicate_v1.csv",
+            "totalRecords": len(demo_txs),
+            "validRecords": len(demo_txs),
+            "invalidRecords": 0,
+            "validationErrors": [],
+            "status": "COMPLETED",
+            "uploadedBy": "system.enterprise_demo",
+            "createdAt": "2026-09-12T12:00:00Z",
+            "completedAt": "2026-09-12T12:00:05Z"
+        }
+    ]
+    
+    # Generate Alerts from flagged transactions
+    alerts = []
+    alert_counter = 1
+    for tx in demo_txs:
+        if tx["isFlagged"]:
+            alerts.append({
+                "_id": f"alt_{alert_counter}",
+                "alertId": f"ALT-2026-{1000+alert_counter}",
+                "transactionId": tx["transactionId"],
+                "severity": tx["riskLevel"],
+                "status": "NEW" if alert_counter > 2 else "IN_REVIEW",
+                "riskScore": tx["riskScore"],
+                "accountId": tx["senderAccountId"],
+                "receiverAccountId": tx["receiverAccountId"],
+                "amount": tx["amount"],
+                "ruleTriggers": [
+                    {
+                        "ruleId": f["ruleId"],
+                        "ruleName": f["ruleName"],
+                        "description": f["description"],
+                        "severity": tx["riskLevel"],
+                        "scoreContribution": f["scoreContribution"]
+                    } for f in tx.get("riskFactors", [])
+                ],
+                "createdAt": tx["timestamp"]
+            })
+            alert_counter += 1
+    MOCK_ALERTS = alerts
+
+    # Generate 3 Priority Investigation Cases
+    MOCK_CASES = [
+        {
+            "_id": "case_001",
+            "caseId": "CASE-2026-001",
+            "title": "Cross-Border Rapid Pass-Through Syndicate (Mule Alpha)",
+            "priority": "CRITICAL",
+            "status": "IN_INVESTIGATION",
+            "riskScore": 93,
+            "assignee": "Sarah Chen, CAMS",
+            "summary": "Suspected mule account exhibiting high-velocity transit within 28 minutes. 97.3% balance retention outbound to offshore jurisdiction.",
+            "transactions": [tx for tx in demo_txs if "ACC-MULE-ALPHA" in [tx["senderAccountId"], tx["receiverAccountId"]]],
+            "createdAt": "2026-09-12T12:30:00Z"
+        },
+        {
+            "_id": "case_002",
+            "caseId": "CASE-2026-002",
+            "title": "Structuring & Smurfing Hub Central Aggregation",
+            "priority": "HIGH",
+            "status": "OPEN",
+            "riskScore": 88,
+            "assignee": "Marcus Vance",
+            "summary": "Coordinated structuring cluster depositing $9,850 to avoid FinCEN CTR limits followed by multi-account layering dispersal.",
+            "transactions": [tx for tx in demo_txs if "ACC-HUB-CENTRAL" in [tx["senderAccountId"], tx["receiverAccountId"]]],
+            "createdAt": "2026-09-12T13:15:00Z"
+        },
+        {
+            "_id": "case_003",
+            "caseId": "CASE-2026-003",
+            "title": "4-Node Circular Capital Flight Loop",
+            "priority": "HIGH",
+            "status": "OPEN",
+            "riskScore": 85,
+            "assignee": "Sarah Chen, CAMS",
+            "summary": "Closed directed graph cycle detected across accounts Ring-A through Ring-D with identical capital amounts.",
+            "transactions": [tx for tx in demo_txs if tx["senderAccountId"].startswith("ACC-RING-")],
+            "createdAt": "2026-09-12T14:00:00Z"
+        }
+    ]
+
+# Seed demo data immediately on startup
+seed_demo_data()
+
+@app.post("/api/v1/transactions/demo-seed")
+async def seed_demo_transactions():
+    seed_demo_data()
+    return {
+        "success": True,
+        "data": {
+            "batchId": "BATCH-DEMO-ENT-001",
+            "validCount": len(MOCK_TRANSACTIONS),
+            "invalidCount": 0,
+            "totalRecords": len(MOCK_TRANSACTIONS),
+            "batch": MOCK_BATCHES[0] if MOCK_BATCHES else {}
+        }
+    }
+
+@app.get("/api/v1/transactions/batches")
+async def get_batches():
+    return {
+        "success": True,
+        "data": {
+            "batches": MOCK_BATCHES
+        }
+    }
+
+@app.get("/api/v1/transactions/stats")
+async def get_transaction_stats():
+    total_count = len(MOCK_TRANSACTIONS)
+    total_volume = sum(t.get("amount", 0) for t in MOCK_TRANSACTIONS)
+    avg_amount = round(total_volume / total_count, 2) if total_count > 0 else 0
+    critical_count = sum(1 for t in MOCK_TRANSACTIONS if t.get("riskLevel") == "CRITICAL" or t.get("riskScore", 0) >= 80)
+    high_risk_count = sum(1 for t in MOCK_TRANSACTIONS if t.get("riskScore", 0) >= 50)
+    flag_count = sum(1 for t in MOCK_TRANSACTIONS if t.get("isFlagged", False))
+    stats_payload = {
+        "totalTransactions": total_count,
+        "totalVolume": round(total_volume, 2),
+        "avgAmount": avg_amount,
+        "criticalCount": critical_count,
+        "highCount": high_risk_count,
+        "flaggedCount": flag_count,
+        "totalCount": total_count,
+        "highRiskCount": high_risk_count,
+        "flagCount": flag_count
+    }
+    return {
+        "success": True,
+        "data": {
+            "stats": stats_payload,
+            **stats_payload
+        }
+    }
+
+@app.get("/api/v1/transactions")
+async def get_transactions(
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=1000),
+    search: Optional[str] = None,
+    minRisk: Optional[int] = None,
+    maxRisk: Optional[int] = None,
+    riskLevel: Optional[str] = None,
+    isFlagged: Optional[bool] = None,
+    transactionType: Optional[str] = None,
+    type: Optional[str] = None
+):
+    filtered = MOCK_TRANSACTIONS
+    if search:
+        s = search.lower()
+        filtered = [
+            t for t in filtered
+            if s in t.get("transactionId", "").lower()
+            or s in t.get("senderAccountId", "").lower()
+            or s in t.get("receiverAccountId", "").lower()
+        ]
+    if minRisk is not None:
+        filtered = [t for t in filtered if t.get("riskScore", 0) >= minRisk]
+    if maxRisk is not None:
+        filtered = [t for t in filtered if t.get("riskScore", 0) <= maxRisk]
+    if riskLevel and riskLevel != "ALL":
+        filtered = [t for t in filtered if t.get("riskLevel") == riskLevel]
+    if isFlagged is not None:
+        filtered = [t for t in filtered if t.get("isFlagged") == isFlagged]
+    resolved_type = transactionType or type
+    if resolved_type and resolved_type != "ALL":
+        filtered = [t for t in filtered if t.get("transactionType", "").upper() == resolved_type.upper()]
+        
+    total = len(filtered)
+    start = (page - 1) * limit
+    end = start + limit
+    paginated = filtered[start:end]
+    total_pages = max(1, (total + limit - 1) // limit)
+    
+    return {
+        "success": True,
+        "data": {
+            "transactions": paginated,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "totalPages": total_pages,
+            "pagination": {
+                "total": total,
+                "page": page,
+                "limit": limit,
+                "totalPages": total_pages
+            }
+        }
+    }
+
+@app.post("/api/v1/transactions/upload")
+async def upload_transactions(file: UploadFile = File(...)):
+    global MOCK_TRANSACTIONS, MOCK_BATCHES
+    content_bytes = await file.read()
+    
+    # 250MB guardrail
+    if len(content_bytes) > 250 * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail={"success": False, "error": {"message": "File exceeds maximum 250MB limit.", "code": "LIMIT_FILE_SIZE"}}
+        )
+        
+    try:
+        text_content = content_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        text_content = content_bytes.decode("latin-1")
+        
+    reader = csv.DictReader(io.StringIO(text_content))
+    batch_id = f"BATCH-{uuid.uuid4().hex[:8].upper()}"
+    
+    valid_txs = []
+    errors = []
+    row_num = 1
+    
+    for row in reader:
+        row_num += 1
+        # Normalize column keys
+        clean_row = {k.strip().lower().replace("_", ""): v.strip() for k, v in row.items() if k}
+        
+        tx_id = clean_row.get("transactionid") or f"TX-{uuid.uuid4().hex[:8].upper()}"
+        sender = clean_row.get("senderaccountid") or clean_row.get("sender") or clean_row.get("source")
+        receiver = clean_row.get("receiveraccountid") or clean_row.get("receiver") or clean_row.get("destination")
+        raw_amt = clean_row.get("amount") or "0"
+        currency = clean_row.get("currency") or "USD"
+        timestamp = clean_row.get("timestamp") or datetime.datetime.now(datetime.timezone.utc).isoformat()
+        tx_type = clean_row.get("transactiontype") or clean_row.get("type") or "TRANSFER"
+        
+        if not sender or not receiver:
+            errors.append({"row": row_num, "column": "accounts", "message": "Missing sender or receiver account ID", "value": f"{sender}->{receiver}"})
+            continue
+            
+        try:
+            amt = float(raw_amt.replace("$", "").replace(",", ""))
+            if amt <= 0:
+                errors.append({"row": row_num, "column": "amount", "message": "Amount must be greater than zero", "value": raw_amt})
+                continue
+        except ValueError:
+            errors.append({"row": row_num, "column": "amount", "message": "Amount must be a numeric value", "value": raw_amt})
+            continue
+            
+        # Automated Risk Scoring
+        risk_score = 15
+        risk_factors = []
+        if amt >= 9800 and amt < 10000:
+            risk_score += 45
+            risk_factors.append({"ruleId": "RULE-STRUCTURING", "ruleName": "Threshold Structuring (<$10k)", "description": "Amount near $10k mandatory CTR limit", "scoreContribution": 45})
+        elif amt >= 10000:
+            risk_score += 30
+            risk_factors.append({"ruleId": "RULE-HIGH-VALUE", "ruleName": "Large Currency Report Threshold", "description": "Exceeds $10,000 threshold", "scoreContribution": 30})
+            
+        if sender.startswith("ACC-MULE") or receiver.startswith("ACC-MULE"):
+            risk_score += 50
+            risk_factors.append({"ruleId": "RULE-MULE-TAG", "ruleName": "Known Mule Account Activity", "description": "Involved identified mule account", "scoreContribution": 50})
+            
+        risk_score = min(100, risk_score)
+        risk_level = "CRITICAL" if risk_score >= 75 else "HIGH" if risk_score >= 50 else "MEDIUM" if risk_score >= 25 else "LOW"
+        
+        valid_txs.append({
+            "_id": f"tx_up_{uuid.uuid4().hex[:8]}",
+            "transactionId": tx_id,
+            "senderAccountId": sender,
+            "receiverAccountId": receiver,
+            "amount": amt,
+            "currency": currency,
+            "timestamp": timestamp,
+            "transactionType": tx_type.upper(),
+            "riskScore": risk_score,
+            "riskLevel": risk_level,
+            "riskFactors": risk_factors,
+            "isFlagged": risk_score >= 50,
+            "ingestionBatchId": batch_id
+        })
+
+    # Prepend new valid transactions
+    MOCK_TRANSACTIONS = valid_txs + MOCK_TRANSACTIONS
+    
+    new_batch = {
+        "_id": f"batch_{batch_id}",
+        "batchId": batch_id,
+        "filename": file.filename or "uploaded_feed.csv",
+        "totalRecords": len(valid_txs) + len(errors),
+        "validRecords": len(valid_txs),
+        "invalidRecords": len(errors),
+        "validationErrors": errors[:50],
+        "status": "COMPLETED" if len(valid_txs) > 0 else "FAILED",
+        "uploadedBy": "investigator.active",
+        "createdAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "completedAt": datetime.datetime.now(datetime.timezone.utc).isoformat()
+    }
+    MOCK_BATCHES.insert(0, new_batch)
+    
+    return {
+        "success": True,
+        "data": {
+            "batchId": batch_id,
+            "validCount": len(valid_txs),
+            "invalidCount": len(errors),
+            "totalRecords": len(valid_txs) + len(errors),
+            "errors": errors[:50],
+            "batch": new_batch,
+            "summary": {
+                "totalTransactions": len(valid_txs) + len(errors),
+                "processedTransactions": len(valid_txs),
+                "flaggedCount": sum(1 for t in valid_txs if t.get("isFlagged")),
+                "criticalCount": sum(1 for t in valid_txs if t.get("riskLevel") == "CRITICAL"),
+            }
+        }
+    }
+
+@app.get("/api/v1/alerts")
+async def get_alerts():
+    return {
+        "success": True,
+        "data": {
+            "alerts": MOCK_ALERTS,
+            "total": len(MOCK_ALERTS)
+        }
+    }
+
+@app.get("/api/v1/alerts/stats")
+async def get_alert_stats():
+    return {
+        "success": True,
+        "data": {
+            "total": len(MOCK_ALERTS),
+            "critical": sum(1 for a in MOCK_ALERTS if a.get("severity") == "CRITICAL"),
+            "high": sum(1 for a in MOCK_ALERTS if a.get("severity") == "HIGH"),
+            "medium": sum(1 for a in MOCK_ALERTS if a.get("severity") == "MEDIUM"),
+            "low": sum(1 for a in MOCK_ALERTS if a.get("severity") == "LOW")
+        }
+    }
+
+@app.get("/api/v1/cases")
+async def get_cases():
+    return {
+        "success": True,
+        "data": {
+            "cases": MOCK_CASES,
+            "total": len(MOCK_CASES)
         }
     }
 
@@ -462,13 +974,13 @@ LANDING_HTML = """<!DOCTYPE html>
         <h2>
           <span>🧠</span> Active Engine Capabilities
         </h2>
-        <p>This Python microservice provides the analytical brain and auth gateway for FraudLens AI:</p>
+        <p>This Python microservice provides the analytical brain and complete API gateway for FraudLens AI:</p>
         <div class="pill-row">
-          <span class="pill">User Auth & Registration</span>
-          <span class="pill">Role-Based Access (Investigator/Admin)</span>
+          <span class="pill">250MB Batch CSV Ingestion</span>
+          <span class="pill">Enterprise Demo Seeding</span>
+          <span class="pill">User Auth &amp; Registration</span>
           <span class="pill">Isolation Forest ML</span>
           <span class="pill">NetworkX Graph Analytics</span>
-          <span class="pill">Deterministic AML Rules</span>
           <span class="pill">SAR Narrative Synthesis</span>
         </div>
       </div>
@@ -478,7 +990,7 @@ LANDING_HTML = """<!DOCTYPE html>
           <span>🖥️</span> Why am I seeing this page?
         </h2>
         <p>
-          This URL is the <strong>FraudLens Intelligence & API Gateway</strong> backend.
+          This URL is the <strong>FraudLens Intelligence &amp; API Gateway</strong> backend.
           The visual investigator web interface lives in the <code>frontend/</code> directory (built with React 19, Cytoscape.js, and Tailwind CSS).
         </p>
         <div class="tip-box">
@@ -511,6 +1023,8 @@ async def custom_root_portal(request: Request):
             "health": "/api/v1/health",
             "capabilities": [
                 "authentication_and_registration",
+                "high_capacity_csv_ingestion_250mb",
+                "enterprise_demo_dataset_seeding",
                 "deterministic_rule_engine",
                 "isolation_forest_anomaly_scorer",
                 "networkx_graph_analytics",

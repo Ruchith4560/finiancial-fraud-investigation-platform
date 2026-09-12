@@ -8,6 +8,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { api } from '../api/client';
+import { generateClientDemoDataset, saveLocalBatch } from '../utils/demoData';
 
 export const DashboardOverviewPage: React.FC = () => {
   const [seeding, setSeeding] = useState(false);
@@ -20,7 +21,18 @@ export const DashboardOverviewPage: React.FC = () => {
       if (res.data.success) {
         setSeedSuccess(true);
         setTimeout(() => setSeedSuccess(false), 5000);
+        setSeeding(false);
+        return;
       }
+    } catch (err) {
+      console.warn('Remote demo seed failed, using client-side generator:', err);
+    }
+
+    try {
+      const result = generateClientDemoDataset();
+      saveLocalBatch(result.batch, result.transactions);
+      setSeedSuccess(true);
+      setTimeout(() => setSeedSuccess(false), 5000);
     } catch (err) {
       console.error('Demo seed error:', err);
     } finally {

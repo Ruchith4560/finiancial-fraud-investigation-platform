@@ -5,12 +5,15 @@ import { requireAuth } from '../middleware/authMiddleware';
 
 export const transactionRouter = Router();
 
-// Configure Multer for memory storage with file size limit of 25MB
+// Configure Multer for memory storage with high-capacity file size limit of 250MB
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 },
+  limits: { fileSize: 250 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
+    const isCsv = file.mimetype === 'text/csv' || 
+                  file.mimetype === 'application/vnd.ms-excel' ||
+                  file.originalname.toLowerCase().endsWith('.csv');
+    if (isCsv) {
       cb(null, true);
     } else {
       cb(new Error('Invalid file type: Only CSV files (.csv) are supported'));
